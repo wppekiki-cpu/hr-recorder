@@ -465,9 +465,14 @@ function parseHeartRate(view) {
   return { bpm, contact, rr };
 }
 
+function onHrValue(e) { onMeasurement(e.target.value); }
+
 function onMeasurement(view) {
   const t = Date.now();
   const m = parseHeartRate(view);
+  // safety net: the same notification delivered twice within a few ms is stored once
+  if (t - state.lastSampleMs < 30 && m.bpm === state.lastBpm) return;
+  state.lastBpm = m.bpm;
   state.lastSampleMs = t;
   ui.bpm.textContent = m.bpm;
   state.recent.push(m.bpm);
@@ -507,7 +512,10 @@ async function openGatt() {
   const server = await state.device.gatt.connect();
   const service = await server.getPrimaryService(HR_SERVICE);
   const ch = await service.getCharacteristic(HR_MEASUREMENT);
-  ch.addEventListener('characteristicvaluechanged', e => onMeasurement(e.target.value));
+  // After a reconnect the browser can hand back the SAME characteristic object: listen only once,
+  // otherwise every heart-rate value is recorded once more per reconnect.
+  ch.removeEventListener('characteristicvaluechanged', onHrValue);
+  ch.addEventListener('characteristicvaluechanged', onHrValue);
   await ch.startNotifications();
   state.connected = true;
   state.userDisconnect = false;
